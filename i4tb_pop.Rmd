@@ -1,0 +1,974 @@
+---
+title: "I4TB"
+author: "Julia Shin"
+output: pdf_document
+header-includes:
+  - \usepackage{comment}
+  - \usepackage{amsmath}
+params:
+  soln: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r donotedit, echo = FALSE, message = FALSE}
+library("knitr"); options(digits = 3, scipen = 2)
+setwd("C:/Users/julia shin/Documents/JHU/I4TB/modeling")
+if (!require("MASS")) install.packages("MASS", repos = "http://cran.us.r-project.org")
+if (!require("gsl")) install.packages("gsl", repos = "http://cran.us.r-project.org")
+if (!require("MBESS")) install.packages("MBESS",repos = "http://cran.us.r-project.org")
+if (!require("matrixStats")) install.packages("matrixStats", repos = "http://cran.us.r-project.org")
+if (!require("Epi")) install.packages("Epi", repos = "http://cran.us.r-project.org")
+library("MASS")
+library("gsl")
+library("MBESS")
+library("matrixStats")
+library("Epi") 
+```
+
+# Step 0: Parameters
+
+```{r step2a parameters}    
+a <- c('brz',	'cmb',	'eth',	'ghn',	'ind',	'idn',	'kny',	'mlw',	'mzb',	'sa',	'tnz',	'zbw')
+
+time=11 #(2020~2030)
+imp.time=10 #3HP effectiveness time =10years
+
+TBrr <- 0.016    #TB reactivation rate/ Golub, AIDS 2007; Sterling AIDS 2016
+eff <- 0.9       #Efficacy of 3HP/ Sterling, N Engl J Med 2011
+comp <- 0.8      #Completion of 3HP/ Sterling, N Engl J Med 2011
+r <- 0.03        #Discount Rate
+fatal<- 0.11     #TB case-fatality for HIV+ on TB treatment
+RRonART <-0.42   #RR for TB mortality if on ART
+UwHIV <- 0.947   #Utility of people with HIV on ART
+LE <- 27         #Life expectancy of HIV-positive individual on ART
+UwTB <- 0.601    #Utility of TB with HIV+ 
+```
+
+# Step 1: Setting Up The population (PLHIV on ART)
+
+``` {r step1a PLHIV on ART} 
+
+# est. number of HIV diagnosed in 2020 
+## (2 years delay from estimated infection)
+n.brz <- 53000
+n.cmb <- 880
+n.eth <- 23000
+n.ghn <- 20000
+n.ind <- 84595
+n.idn <- 46000
+n.kny <- 46000
+n.mlw <- 38000
+n.mzb <- 150000
+n.sa <- 240000
+n.tnz <- 72000
+n.zbw <- 38000
+pop <- c(n.brz, n.cmb, n.eth, n.ghn, n.ind, n.idn, n.kny, n.mlw, n.mzb, n.sa, n.tnz, n.zbw)
+
+m.pop <- matrix(pop, nrow=1, ncol=12)
+
+# Annual growth rate of HIV infection
+pHIV.brz <- 0.0211
+pHIV.cmb <- -0.1061
+pHIV.eth <- -0.0294
+pHIV.ghn <- -0.0095
+pHIV.ind <- -0.0387
+pHIV.idn <- -0.0310
+pHIV.kny <- -0.0438
+pHIV.mlw <- -0.0363
+pHIV.mzb <- -0.00
+pHIV.sa <- -0.0521
+pHIV.tnz <- -0.0199
+pHIV.zbw <- -0.0523
+
+m.pHIV <- matrix(c(0:0), nrow=12, ncol=12)
+m.pHIV[1,1] <- pHIV.brz+1
+m.pHIV[2,2] <- pHIV.cmb+1 
+m.pHIV[3,3] <- pHIV.eth+1
+m.pHIV[4,4] <- pHIV.ghn+1
+m.pHIV[5,5] <- pHIV.ind +1
+m.pHIV[6,6] <- pHIV.idn +1
+m.pHIV[7,7] <- pHIV.kny+1
+m.pHIV[8,8] <- pHIV.mlw+1
+m.pHIV[9,9] <- pHIV.mzb +1
+m.pHIV[10,10] <- pHIV.sa +1
+m.pHIV[11,11] <- pHIV.tnz+1
+m.pHIV[12,12] <- pHIV.zbw+1
+
+ 
+m.pop%*%(m.pHIV)
+
+## 2020~2030 # of PLHIV diagnosed
+m <- matrix( ,nrow=time, ncol=12)
+m[1,] <- m.pop 
+for (i in 2:time) {
+    m[i, ] = m[i-1, ]%*%(m.pHIV)
+  }  
+
+# ART coverage
+pART.brz <- 0.81
+pART.cmb <- 0.855
+pART.eth <- 0.81
+pART.ghn <- 0.81
+pART.ind <- 0.81
+pART.idn <- 0.81
+pART.kny <- 0.81
+pART.mlw <- 0.81
+pART.mzb <- 0.81
+pART.sa <- 0.81
+pART.tnz <- 0.828
+pART.zbw <- 0.855
+
+m.pART <- matrix(c(0:0), nrow=12, ncol=12)
+m.pART[1,1] <- pART.brz
+m.pART[2,2] <- pART.cmb 
+m.pART[3,3] <- pART.eth
+m.pART[4,4] <- pART.ghn
+m.pART[5,5] <- pART.ind 
+m.pART[6,6] <- pART.idn 
+m.pART[7,7] <- pART.kny
+m.pART[8,8] <- pART.mlw
+m.pART[9,9] <- pART.mzb 
+m.pART[10,10] <- pART.sa 
+m.pART[11,11] <- pART.tnz
+m.pART[12,12] <- pART.zbw
+ 
+## 2020~2030 # of PLHIV on ART 
+m.ART <- matrix( ,nrow=time, ncol=12)
+for (i in 1:time) {
+m.ART[i, ] <- m [i, ]%*%m.pART 
+    }  
+
+
+i4tb.pop<- read.csv('/users/julia shin/Documents/JHU/I4TB/i4tb_pop.csv')
+m.i4tb<- data.matrix(i4tb.pop)
+
+m.i4tb <- m.i4tb[ ,-1] ##I4TB population
+
+```
+
+```{r step1b PLHIV on TPT (Status Quo)}
+# TPT coverage
+pTPT.brz <- 0.31
+pTPT.cmb <- 0.21
+pTPT.eth <- 0.49
+pTPT.ghn <- 0.46
+pTPT.ind <- 0.17
+pTPT.idn <- 0.10
+pTPT.kny <- 0.33
+pTPT.mlw <- 0.50
+pTPT.mzb <- 0.52
+pTPT.sa <- 0.65
+pTPT.tnz <- 0.09
+pTPT.zbw <- 0.73
+
+m.pTPT <- matrix(c(0:0), nrow=12, ncol=12)
+m.pTPT[1,1] <- pTPT.brz
+m.pTPT[2,2] <- pTPT.cmb 
+m.pTPT[3,3] <- pTPT.eth
+m.pTPT[4,4] <- pTPT.ghn
+m.pTPT[5,5] <- pTPT.ind 
+m.pTPT[6,6] <- pTPT.idn 
+m.pTPT[7,7] <- pTPT.kny
+m.pTPT[8,8] <- pTPT.mlw
+m.pTPT[9,9] <- pTPT.mzb 
+m.pTPT[10,10] <- pTPT.sa 
+m.pTPT[11,11] <- pTPT.tnz
+m.pTPT[12,12] <- pTPT.zbw
+ 
+ ## 2020~2030 # of PLHIV on TPT 
+m.TPT <- matrix( ,nrow=time, ncol=12)
+for (i in 1:time) {
+m.TPT[i, ] <- m.ART [i, ]%*%m.pTPT 
+    }  
+
+
+```
+
+# Step 2: Scenario1 of 3HP coverage
+
+``` {r step2a 3HP coverage estimation S1} 
+## Group 1 reach to 90% by 2030, G2 reach to 70% by 2030
+m.p3HP.S1 <- matrix(c(0:0), nrow=time, ncol=12)
+m.p3HP.S1[1,1] <- pTPT.brz
+m.p3HP.S1[1,2] <- pTPT.cmb 
+m.p3HP.S1[1,3] <- pTPT.eth
+m.p3HP.S1[1,4] <- pTPT.ghn
+m.p3HP.S1[1,5] <- pTPT.ind 
+m.p3HP.S1[1,6] <- pTPT.idn 
+m.p3HP.S1[1,7] <- pTPT.kny
+m.p3HP.S1[1,8] <- pTPT.mlw
+m.p3HP.S1[1,9] <- pTPT.mzb 
+m.p3HP.S1[1,10] <- pTPT.sa 
+m.p3HP.S1[1,11] <- pTPT.tnz
+m.p3HP.S1[1,12] <- pTPT.zbw
+for (i in 2:time) {
+m.p3HP.S1[i,1] <- m.p3HP.S1[i-1,1]* ((0.7/pTPT.brz)^(1/10))
+m.p3HP.S1[i,2] <- m.p3HP.S1[i-1,2]* ((0.7/pTPT.cmb)^(1/10)) 
+m.p3HP.S1[i,3] <- m.p3HP.S1[i-1,3]* ((0.9/pTPT.eth)^(1/10)) 
+m.p3HP.S1[i,4] <- m.p3HP.S1[i-1,4]* ((0.9/pTPT.ghn)^(1/10)) 
+m.p3HP.S1[i,5] <- m.p3HP.S1[i-1,5]* ((0.7/pTPT.ind)^(1/10)) 
+m.p3HP.S1[i,6] <- m.p3HP.S1[i-1,6]* ((0.7/pTPT.idn)^(1/10)) 
+m.p3HP.S1[i,7] <- m.p3HP.S1[i-1,7]* ((0.9/pTPT.kny)^(1/10)) 
+m.p3HP.S1[i,8] <- m.p3HP.S1[i-1,8]* ((0.9/pTPT.mlw)^(1/10)) 
+m.p3HP.S1[i,9] <- m.p3HP.S1[i-1,9]* ((0.9/pTPT.mzb)^(1/10)) 
+m.p3HP.S1[i,10] <- m.p3HP.S1[i-1,10]* ((0.9/pTPT.sa)^(1/10)) 
+m.p3HP.S1[i,11] <- m.p3HP.S1[i-1,11]* ((0.9/pTPT.tnz)^(1/10)) 
+m.p3HP.S1[i,12] <- m.p3HP.S1[i-1,12]* ((0.9/pTPT.zbw)^(1/10))  
+} 
+
+rownames(m.p3HP.S1) <- c(2020:2030)
+colnames(m.p3HP.S1) <- c(a)
+
+### graph ####
+matplot(m.p3HP.S1, type="b", pch=c(16,16,1,1,16,16,1,1,1,1,1,1), col=c(1:12),xlab="year",ylab="TPT coverage rate", main="TPT coverage projection (S1)",axes=F)
+axis(side=2, at=c(0,0.7, 0.9))
+TimePoints=2020:2030
+axis(side=1,at=1:11,labels=TimePoints)
+#####
+
+
+m.pIPT <- matrix(c(0:0), nrow=time, ncol=12) 
+m.pIPT[,1] <- pTPT.brz
+m.pIPT[,2] <- pTPT.cmb 
+m.pIPT[,3] <- pTPT.eth
+m.pIPT[,4] <- pTPT.ghn
+m.pIPT[,5] <- pTPT.ind 
+m.pIPT[,6] <- pTPT.idn 
+m.pIPT[,7] <- pTPT.kny
+m.pIPT[,8] <- pTPT.mlw
+m.pIPT[,9] <- pTPT.mzb 
+m.pIPT[,10] <- pTPT.sa 
+m.pIPT[,11] <- pTPT.tnz
+m.pIPT[,12] <- pTPT.zbw
+
+m.pS1 <- m.p3HP.S1 - m.pIPT  ## additional coverage by Scenario 1
+``` 
+ 
+``` {r step2b catalytic impact population S1}  
+m.S1 <- m.ART * m.pS1 
+``` 
+
+#3. I4TB
+
+``` {r step3a I4TB cohort survival projection}      
+
+#1. I4TB cohort 
+
+l.cohort.i4tb <- vector("list", 12)
+for (k in 1:12) {
+  l.cohort.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:4) {
+  l.cohort.i4tb[[k]][1,i] <- t(m.i4tb)[k,i] 
+    for (j in 2:imp.time) {
+      l.cohort.i4tb[[k]][j,i] <- l.cohort.i4tb[[k]][j-1,i] - l.cohort.i4tb[[k]][j-1,i]*log(0.5)/-LE 
+        }}
+}
+
+names(l.cohort.i4tb) <- paste0(a)
+## l.country.i4tb$brz [i,j]: i=time(2018+i+j)~ 10years // j=cohort (2019+j)
+
+```
+
+
+
+```{r Step3b I4TB case}
+#2. case
+
+l.case.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.case.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.case.i4tb[[k]][i,j] <- l.cohort.i4tb[[k]][i,j]*(1-exp(-TBrr))*eff*comp 
+}}
+}
+names(l.case.i4tb) <- paste0(a)
+
+## discounted case averted
+
+l.case.dis.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.case.dis.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.case.dis.i4tb[[k]][i,j] <- l.case.i4tb[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.case.dis.i4tb) <- paste0(a)
+
+```
+
+
+```{r step3c I4TB death averted projection}
+
+l.death.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.death.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.death.i4tb[[k]][i,j] <- l.case.i4tb[[k]][i,j]*fatal*RRonART
+}}
+}
+names(l.death.i4tb) <- paste0(a)
+
+## discounted death averted
+
+l.death.dis.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.death.dis.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.death.dis.i4tb[[k]][i,j] <- l.death.i4tb[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.death.dis.i4tb) <- paste0(a)
+```
+
+
+```{r step3d I4TB DALY averted projection}
+
+l.DALY.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.DALY.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.DALY.i4tb[[k]][i,j] <- l.death.i4tb[[k]][i,j]*UwHIV*((1/r)*(1-exp(-r*(LE-i+1)))) + l.case.i4tb[[k]][i,j]*(UwHIV-UwTB)
+}}
+}
+names(l.DALY.i4tb) <- paste0(a)
+
+## discounted DALY averted
+
+l.DALY.dis.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.DALY.dis.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.DALY.dis.i4tb[[k]][i,j] <- l.DALY.i4tb[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.DALY.dis.i4tb) <- paste0(a)
+```
+
+```{r step3e I4TB cost projection }
+
+price1 = 37
+price2 = 18
+
+cOPD.brz <- 2.4
+cOPD.cmb <- 1.64
+cOPD.eth <- 0.77
+cOPD.ghn <- 1.59
+cOPD.ind <- 2.2
+cOPD.idn <- 4.37
+cOPD.kny <- 1.73
+cOPD.mlw <- 0.67
+cOPD.mzb <- 1.06
+cOPD.sa <- 9.54
+cOPD.tnz <- 1.11
+cOPD.zbw <- 2.62
+
+cOPD <- c(cOPD.brz, cOPD.cmb, cOPD.eth, cOPD.ghn, cOPD.ind, cOPD.idn, cOPD.kny, cOPD.mlw, cOPD.mzb, cOPD.sa, cOPD.tnz, cOPD.zbw)
+
+df <- 1.17074 #Inflation: 2008 -> 2018 USD (GDP deflator)
+
+l.delivery.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.delivery.i4tb[[k]]<-matrix(NA, nrow=1, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2023 cohorts
+  for (j in 1:4) {
+  l.delivery.i4tb[[k]][1,j] <- l.cohort.i4tb[[k]][1,j]*(price1+3*cOPD[k]*df)
+  }
+}
+names(l.delivery.i4tb) <- paste0(a)
+
+```
+
+```{r step3f cost saved projection}
+
+cGDP.brz <- 8920.8
+cGDP.cmb <- 1512.1
+cGDP.eth <- 772.3
+cGDP.ghn <- 2202.3
+cGDP.ind <- 2015.6 	
+cGDP.idn <- 3893.6
+cGDP.kny <- 1710.5 
+cGDP.mlw <- 389.4
+cGDP.mzb <- 490.2 
+cGDP.sa  <- 6374.0
+cGDP.tnz <- 1050.7
+cGDP.zbw <- 2147.0  
+  			  			  			 			 		 						 						  					 	
+cGDP <- c(cGDP.brz, cGDP.cmb, cGDP.eth, cGDP.ghn, cGDP.ind, cGDP.idn, cGDP.kny, cGDP.mlw, cGDP.mzb, cGDP.sa, cGDP.tnz, cGDP.zbw)
+
+cTB <- exp(-2.2+1.1*log(cGDP))
+
+cART = 64
+
+l.costsaved.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.costsaved.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.costsaved.i4tb[[k]][i,j] <- l.case.i4tb[[k]][i,j]*cTB[k] - l.death.i4tb[[k]][i,j]*cART*(LE-i+1)
+  }}
+}
+names(l.costsaved.i4tb) <- paste0(a)
+
+## discounted cost saved
+
+l.costsaved.dis.i4tb <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.costsaved.dis.i4tb[[k]]<-matrix(NA, nrow=imp.time, ncol=4)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:4) {
+  l.costsaved.dis.i4tb[[k]][i,j] <- l.costsaved.i4tb[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.costsaved.dis.i4tb) <- paste0(a)
+
+l.costsaved.dis.i4tb$brz
+```
+
+``` {r step3g Cost effectiveness_I4TB}  
+#1. case averted
+case.sum.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (k in 1:12) {
+  case.sum.i4tb[k, ]<- colSums(l.case.dis.i4tb[[k]])  }
+
+case.sum.dis.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (i in 1:4) {
+case.sum.dis.i4tb[, i] <- case.sum.i4tb[, i]*(1/(1+r)^(i-1))} 
+
+Case.averted.i4tb<- rowSums(case.sum.dis.i4tb)
+sum(Case.averted.i4tb)
+
+#2. death averted
+death.sum.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (k in 1:12) {
+  death.sum.i4tb[k, ]<- colSums(l.death.dis.i4tb[[k]])  }
+
+death.sum.dis.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (i in 1:4) {
+death.sum.dis.i4tb[, i] <- death.sum.i4tb[, i]*(1/(1+r)^(i-1))} 
+
+Death.averted.i4tb<- rowSums(death.sum.dis.i4tb)
+sum(Death.averted.i4tb)
+
+#3. DALY averted
+DALY.sum.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (k in 1:12) {
+  DALY.sum.i4tb[k, ]<- colSums(l.DALY.dis.i4tb[[k]])  }
+
+DALY.sum.dis.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (i in 1:4) {
+DALY.sum.dis.i4tb[, i] <- DALY.sum.i4tb[, i]*(1/(1+r)^(i-1))} 
+
+DALY.averted.i4tb<- rowSums(DALY.sum.dis.i4tb)
+sum(DALY.averted.i4tb)
+
+#4. Delivery cost
+Delivery.sum.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (k in 1:12) {
+  Delivery.sum.i4tb[k, ]<- l.delivery.i4tb[[k]]  }
+
+Delivery.sum.dis.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (i in 1:4) {
+Delivery.sum.dis.i4tb[, i] <- Delivery.sum.i4tb[, i]*(1/(1+r)^(i-1))} 
+
+Delivery.cost.i4tb<- rowSums(Delivery.sum.dis.i4tb)
+sum(Delivery.cost.i4tb)
+
+#4-1. Top-down cost
+Topdowncost <- matrix( , nrow=4, ncol=1)
+Topdowncost[1,1] <-14031848
+Topdowncost[2,1] <-19133771
+Topdowncost[3,1] <-17719493
+Topdowncost[4,1] <-13964771
+
+Topdowncost.dis <- matrix( , nrow=4, ncol=1)
+for (i in 1:4) {
+  Topdowncost.dis[i,1] <- Topdowncost[i,1]*(1/(1+r))^(i-1)}
+
+Topdown.cost.i4tb<- colSums(Topdowncost.dis)
+Topdown.cost.i4tb
+
+#5. Cost saved
+costsaved.sum.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (k in 1:12) {
+  costsaved.sum.i4tb[k, ]<- colSums(l.costsaved.dis.i4tb[[k]])  }
+
+costsaved.sum.dis.i4tb <- matrix(NA, nrow=12, ncol=4)   
+for (i in 1:4) {
+costsaved.sum.dis.i4tb[, i] <- costsaved.sum.i4tb[, i]*(1/(1+r)^(i-1))} 
+
+cost.saved.i4tb<- rowSums(costsaved.sum.dis.i4tb)
+sum(cost.saved.i4tb)
+```
+
+```{r step3h I4TB summary_ICER}
+
+#Total cost saved (drug price $37)
+Cost.i4tb = sum(Delivery.cost.i4tb) - sum(cost.saved.i4tb) 
+Cost.i4tb
+
+#Total cost saved (Top-down cost)
+Cost.topdown.i4tb = Topdown.cost.i4tb - sum(cost.saved.i4tb) 
+Cost.topdown.i4tb
+
+#ICER
+ICER.i4tb= Cost.i4tb/sum(DALY.averted.i4tb)
+ICER.i4tb
+
+ICER.topdown.i4tb= Cost.topdown.i4tb/sum(DALY.averted.i4tb)
+ICER.topdown.i4tb
+```
+
+```{r step3i I4TB #of case and death}
+
+#case averted per year (10 year horizon)
+l.case.i4tb[[1]]
+net.caseaverted <- vector("list", 12)
+for (k in 1:12) {
+  net.caseaverted[[k]]<-matrix(NA, nrow=imp.time+4, ncol=4)   
+#nrow:2020~2030 (10-time horizon survival per cohort)  
+#ncol:[,1] 2020 ~ [,4] 2023 cohorts
+for (i in 1:4) {
+   net.caseaverted[[k]][ ,1] <- rbind(l.case.i4tb[,1],c(0))
+   
+    for (j in 2:imp.time) {
+      l.cohort.i4tb[[k]][j,i] <- l.cohort.i4tb[[k]][j-1,i] - l.cohort.i4tb[[k]][j-1,i]*log(0.5)/-LE 
+        }}
+}
+
+names(l.cohort.i4tb) <- paste0(a)
+
+
+
+
+
+caseaverted <- matrix(NA, nrow=12, ncol=20) 
+for (k in 1:12) {
+  caseaverted[k,1] <- l.case[[k]][1,1]
+  caseaverted[k,2] <- l.case[[k]][2,1]+l.case[[k]][1,2]
+  caseaverted[k,3] <- l.case[[k]][3,1]+l.case[[k]][2,2]+l.case[[k]][1,3]
+  caseaverted[k,4] <- l.case[[k]][4,1]+l.case[[k]][3,2]+l.case[[k]][2,3]+l.case[[k]][1,4]
+  caseaverted[k,5] <- l.case[[k]][5,1]+l.case[[k]][4,2]+l.case[[k]][3,3]+l.case[[k]][2,4]+l.case[[k]][1,5]  
+  caseaverted[k,6] <- l.case[[k]][6,1]+l.case[[k]][5,2]+l.case[[k]][4,3]+l.case[[k]][3,4]+l.case[[k]][2,5]+l.case[[k]][1,6]
+  caseaverted[k,7] <- l.case[[k]][7,1]+l.case[[k]][6,2]+l.case[[k]][5,3]+l.case[[k]][4,4]+l.case[[k]][3,5]+l.case[[k]][2,6]+l.case[[k]][1,7]
+  caseaverted[k,8] <- l.case[[k]][8,1]+l.case[[k]][7,2]+l.case[[k]][6,3]+l.case[[k]][5,4]+l.case[[k]][4,5]+l.case[[k]][3,6]+l.case[[k]][2,7]+l.case[[k]][1,8]
+  caseaverted[k,9] <- l.case[[k]][9,1]+l.case[[k]][8,2]+l.case[[k]][7,3]+l.case[[k]][6,4]+l.case[[k]][5,5]+l.case[[k]][4,6]+l.case[[k]][3,7]+l.case[[k]][2,8]+l.case[[k]][1,9]
+  caseaverted[k,10] <- l.case[[k]][10,1]+l.case[[k]][9,2]+l.case[[k]][8,3]+l.case[[k]][7,4]+l.case[[k]][6,5]+l.case[[k]][5,6]+l.case[[k]][4,7]+l.case[[k]][3,8]+l.case[[k]][2,9]+l.case[[k]][1,10]
+  caseaverted[k,11] <- l.case[[k]][10,2]+l.case[[k]][9,3]+l.case[[k]][8,4]+l.case[[k]][7,5]+l.case[[k]][6,6]+l.case[[k]][5,7]+l.case[[k]][4,8]+l.case[[k]][3,9]+l.case[[k]][2,10]+l.case[[k]][1,11]
+  caseaverted[k,12] <- l.case[[k]][10,3]+l.case[[k]][9,4]+l.case[[k]][8,5]+l.case[[k]][7,6]+l.case[[k]][6,7]+l.case[[k]][5,8]+l.case[[k]][4,9]+l.case[[k]][3,10]+l.case[[k]][2,11] 
+  caseaverted[k,13] <- l.case[[k]][10,4]+l.case[[k]][9,5]+l.case[[k]][8,6]+l.case[[k]][7,7]+l.case[[k]][6,8]+l.case[[k]][5,9]+l.case[[k]][4,10]+l.case[[k]][3,11] 
+  caseaverted[k,14] <- l.case[[k]][10,5]+l.case[[k]][9,6]+l.case[[k]][8,7]+l.case[[k]][7,8]+l.case[[k]][6,9]+l.case[[k]][5,10]+l.case[[k]][4,11]  
+  caseaverted[k,15] <- l.case[[k]][10,6]+l.case[[k]][9,7]+l.case[[k]][8,8]+l.case[[k]][7,9]+l.case[[k]][6,10]+l.case[[k]][5,11] 
+  caseaverted[k,16] <- l.case[[k]][10,7]+l.case[[k]][9,8]+l.case[[k]][8,9]+l.case[[k]][7,10]+l.case[[k]][6,11] 
+  caseaverted[k,17] <- l.case[[k]][10,8]+l.case[[k]][9,9]+l.case[[k]][8,10]+l.case[[k]][7,11]
+  caseaverted[k,18] <- l.case[[k]][10,9]+l.case[[k]][9,10]+l.case[[k]][8,11] 
+  caseaverted[k,19] <- l.case[[k]][10,10]+l.case[[k]][9,11] 
+  caseaverted[k,20] <- l.case[[k]][10,11] }
+  
+case.averted <- colSums(caseaverted)
+
+#death averted per year (10 year horizon)
+
+deathaverted <- matrix(NA, nrow=12, ncol=20) 
+for (k in 1:12) {
+  deathaverted[k,1] <- l.death[[k]][1,1]
+  deathaverted[k,2] <- l.death[[k]][2,1]+l.death[[k]][1,2]
+  deathaverted[k,3] <- l.death[[k]][3,1]+l.death[[k]][2,2]+l.death[[k]][1,3]
+  deathaverted[k,4] <- l.death[[k]][4,1]+l.death[[k]][3,2]+l.death[[k]][2,3]+l.death[[k]][1,4]
+  deathaverted[k,5] <- l.death[[k]][5,1]+l.death[[k]][4,2]+l.death[[k]][3,3]+l.death[[k]][2,4]+l.death[[k]][1,5]  
+  deathaverted[k,6] <- l.death[[k]][6,1]+l.death[[k]][5,2]+l.death[[k]][4,3]+l.death[[k]][3,4]+l.death[[k]][2,5]+l.death[[k]][1,6]
+  deathaverted[k,7] <- l.death[[k]][7,1]+l.death[[k]][6,2]+l.death[[k]][5,3]+l.death[[k]][4,4]+l.death[[k]][3,5]+l.death[[k]][2,6]+l.death[[k]][1,7]
+  deathaverted[k,8] <- l.death[[k]][8,1]+l.death[[k]][7,2]+l.death[[k]][6,3]+l.death[[k]][5,4]+l.death[[k]][4,5]+l.death[[k]][3,6]+l.death[[k]][2,7]+l.death[[k]][1,8]
+  deathaverted[k,9] <- l.death[[k]][9,1]+l.death[[k]][8,2]+l.death[[k]][7,3]+l.death[[k]][6,4]+l.death[[k]][5,5]+l.death[[k]][4,6]+l.death[[k]][3,7]+l.death[[k]][2,8]+l.death[[k]][1,9]
+  deathaverted[k,10] <- l.death[[k]][10,1]+l.death[[k]][9,2]+l.death[[k]][8,3]+l.death[[k]][7,4]+l.death[[k]][6,5]+l.death[[k]][5,6]+l.death[[k]][4,7]+l.death[[k]][3,8]+l.death[[k]][2,9]+l.death[[k]][1,10]
+  deathaverted[k,11] <- l.death[[k]][10,2]+l.death[[k]][9,3]+l.death[[k]][8,4]+l.death[[k]][7,5]+l.death[[k]][6,6]+l.death[[k]][5,7]+l.death[[k]][4,8]+l.death[[k]][3,9]+l.death[[k]][2,10]+l.death[[k]][1,11]
+  deathaverted[k,12] <- l.death[[k]][10,3]+l.death[[k]][9,4]+l.death[[k]][8,5]+l.death[[k]][7,6]+l.death[[k]][6,7]+l.death[[k]][5,8]+l.death[[k]][4,9]+l.death[[k]][3,10]+l.death[[k]][2,11] 
+  deathaverted[k,13] <- l.death[[k]][10,4]+l.death[[k]][9,5]+l.death[[k]][8,6]+l.death[[k]][7,7]+l.death[[k]][6,8]+l.death[[k]][5,9]+l.death[[k]][4,10]+l.death[[k]][3,11] 
+  deathaverted[k,14] <- l.death[[k]][10,5]+l.death[[k]][9,6]+l.death[[k]][8,7]+l.death[[k]][7,8]+l.death[[k]][6,9]+l.death[[k]][5,10]+l.death[[k]][4,11]  
+  deathaverted[k,15] <- l.death[[k]][10,6]+l.death[[k]][9,7]+l.death[[k]][8,8]+l.death[[k]][7,9]+l.death[[k]][6,10]+l.death[[k]][5,11] 
+  deathaverted[k,16] <- l.death[[k]][10,7]+l.death[[k]][9,8]+l.death[[k]][8,9]+l.death[[k]][7,10]+l.death[[k]][6,11] 
+  deathaverted[k,17] <- l.death[[k]][10,8]+l.death[[k]][9,9]+l.death[[k]][8,10]+l.death[[k]][7,11]
+  deathaverted[k,18] <- l.death[[k]][10,9]+l.death[[k]][9,10]+l.death[[k]][8,11] 
+  deathaverted[k,19] <- l.death[[k]][10,10]+l.death[[k]][9,11] 
+  deathaverted[k,20] <- l.death[[k]][10,11] }
+  
+death.averted <- colSums(deathaverted)
+
+  
+```
+
+ 
+#4. catalytic Impact
+``` {r step4a S1 cohort survival projection}
+
+#1. Catalytic cohort.
+
+l.cohort.S1 <- vector("list", 12)
+for (k in 1:12) {
+  l.cohort.S1[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:27-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:time) {
+  l.cohort.S1[[k]][1,i] <- t(m.S1)[k,i] 
+    for (j in 2:imp.time) {
+      l.cohort.S1[[k]][j,i] <- l.cohort.S1[[k]][j-1,i] - l.cohort.S1[[k]][j-1,i]*log(0.5)/-LE 
+        }}
+}
+
+names(l.cohort.S1) <- paste0(a)
+## l.country$brz [i,j]: i=time(2018+i+j)~ 27years // j=cohort (2019+j)
+```
+
+
+```{r step4b S1 case averted projection}
+#2. case 
+
+l.case.S1 <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.case.S1[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.case.S1[[k]][i,j] <- l.cohort.S1[[k]][i,j]*(1-exp(-TBrr))*eff*comp 
+}}
+}
+names(l.case.S1) <- paste0(a)
+
+## discounted case averted
+
+l.case.S1.dis <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.case.S1.dis[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.case.S1.dis[[k]][i,j] <- l.case.S1[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.case.S1.dis) <- paste0(a)
+
+```
+
+```{r step4c S1 death averted projection}
+
+l.death.S1 <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.death.S1[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.death.S1[[k]][i,j] <- l.case.S1[[k]][i,j]*fatal*RRonART
+}}
+}
+names(l.death.S1) <- paste0(a)
+
+## discounted death averted
+
+l.death.S1.dis <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.death.S1.dis[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.death.S1.dis[[k]][i,j] <- l.death.S1[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.death.S1.dis) <- paste0(a)
+```
+
+
+```{r step4d S1 DALY averted projection}
+
+l.DALY.S1 <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.DALY.S1[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.DALY.S1[[k]][i,j] <- l.death.S1[[k]][i,j]*UwHIV*((1/r)*(1-exp(-r*(LE-i+1)))) + l.case.S1[[k]][i,j]*(UwHIV-UwTB)
+}}
+}
+names(l.DALY.S1) <- paste0(a)
+
+## discounted DALY averted
+
+l.DALY.S1.dis <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.DALY.S1.dis[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.DALY.S1.dis[[k]][i,j] <- l.DALY.S1[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.DALY.S1.dis) <- paste0(a)
+
+```
+
+
+```{r step4e S1 delivery cost projection}
+
+price1 = 37
+price2 = 18
+
+cOPD.brz <- 2.4
+cOPD.cmb <- 1.64
+cOPD.eth <- 0.77
+cOPD.ghn <- 1.59
+cOPD.ind <- 2.2
+cOPD.idn <- 4.37
+cOPD.kny <- 1.73
+cOPD.mlw <- 0.67
+cOPD.mzb <- 1.06
+cOPD.sa <- 9.54
+cOPD.tnz <- 1.11
+cOPD.zbw <- 2.62
+
+cOPD <- c(cOPD.brz, cOPD.cmb, cOPD.eth, cOPD.ghn, cOPD.ind, cOPD.idn, cOPD.kny, cOPD.mlw, cOPD.mzb, cOPD.sa, cOPD.tnz, cOPD.zbw)
+
+df <- 1.17074  #Inflation: 2008 -> 2018 USD (GDP deflator)
+
+l.delivery.S1 <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.delivery.S1[[k]]<-matrix(NA, nrow=1, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+  for (j in 1:4) {
+  l.delivery.S1[[k]][1,j] <- l.cohort.S1[[k]][1,j]*(price1+3*cOPD[k]*df)
+  
+  for (j in 5:time) {
+  l.delivery.S1[[k]][1,j] <- l.cohort.S1[[k]][1,j]*(price2+3*cOPD[k]*df)
+  }}
+}
+names(l.delivery.S1) <- paste0(a)
+
+```
+
+```{r step4f S1 cost saved projection}
+
+cGDP.brz <- 8920.8
+cGDP.cmb <- 1512.1
+cGDP.eth <- 772.3
+cGDP.ghn <- 2202.3
+cGDP.ind <- 2015.6 	
+cGDP.idn <- 3893.6
+cGDP.kny <- 1710.5 
+cGDP.mlw <- 389.4
+cGDP.mzb <- 490.2 
+cGDP.sa  <- 6374.0
+cGDP.tnz <- 1050.7
+cGDP.zbw <- 2147.0 
+  			  			  			 			 		 						 						  					 	
+cGDP <- c(cGDP.brz, cGDP.cmb, cGDP.eth, cGDP.ghn, cGDP.ind, cGDP.idn, cGDP.kny, cGDP.mlw, cGDP.mzb, cGDP.sa, cGDP.tnz, cGDP.zbw)
+
+cTB <- exp(-2.2+1.1*log(cGDP))
+
+cART = 64
+
+l.costsaved.S1 <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.costsaved.S1[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.costsaved.S1[[k]][i,j] <- l.case.S1[[k]][i,j]*cTB[k] - l.death.S1[[k]][i,j]*cART*(LE-i+1)
+  }}
+}
+names(l.costsaved.S1) <- paste0(a)
+
+## discounted death averted
+
+l.costsaved.S1.dis <- vector("list", 12)
+for (k in 1:12) { ##k=country name
+  l.costsaved.S1.dis[[k]]<-matrix(NA, nrow=imp.time, ncol=time)   
+#nrow:10-time horizon survival per cohort  
+#ncol:[,1] 2020 ~ [,11] 2030 cohorts
+for (i in 1:imp.time) {
+  for (j in 1:time) {
+  l.costsaved.S1.dis[[k]][i,j] <- l.costsaved.S1[[k]][i,j]*(1/(1+r)^(i-1)) 
+}}
+}
+names(l.costsaved.S1.dis) <- paste0(a)
+```
+
+
+``` {r step4g S1 cost effectiveness}
+
+#1. case averted
+case.sum.S1 <- matrix(NA, nrow=12, ncol=time)   
+for (k in 1:12) {
+  case.sum.S1[k, ]<- colSums(l.case.S1.dis[[k]])  }
+
+case.sum.S1.dis <- matrix(NA, nrow=12, ncol=time)   
+for (i in 1:time) {
+case.sum.S1.dis[, i] <- case.sum.S1[, i]*(1/(1+r)^(i-1))} 
+
+Case.averted.S1<- rowSums(case.sum.S1.dis)
+sum(Case.averted.S1)
+
+#2. death averted
+death.sum.S1 <- matrix(NA, nrow=12, ncol=time)   
+for (k in 1:12) {
+  death.sum.S1[k, ]<- colSums(l.death.S1.dis[[k]])  }
+
+death.sum.S1.dis <- matrix(NA, nrow=12, ncol=time)   
+for (i in 1:time) {
+death.sum.S1.dis[, i] <- death.sum.S1[, i]*(1/(1+r)^(i-1))} 
+
+Death.averted.S1<- rowSums(death.sum.S1.dis)
+sum(Death.averted.S1)
+
+#3. DALY averted
+DALY.sum.S1 <- matrix(NA, nrow=12, ncol=time)   
+for (k in 1:12) {
+  DALY.sum.S1[k, ]<- colSums(l.DALY.S1.dis[[k]])  }
+
+DALY.sum.S1.dis <- matrix(NA, nrow=12, ncol=time)   
+for (i in 1:time) {
+DALY.sum.S1.dis[, i] <- DALY.sum.S1[, i]*(1/(1+r)^(i-1))} 
+
+DALY.averted.S1<- rowSums(DALY.sum.S1.dis)
+sum(DALY.averted.S1)
+
+#4. Delivery cost
+Delivery.sum.S1 <- matrix(NA, nrow=12, ncol=time)   
+for (k in 1:12) {
+  Delivery.sum.S1[k, ]<- l.delivery.S1[[k]]  }
+
+Delivery.sum.S1.dis <- matrix(NA, nrow=12, ncol=time)   
+for (i in 1:time) {
+Delivery.sum.S1.dis[, i] <- Delivery.sum.S1[, i]*(1/(1+r)^(i-1))} 
+
+Delivery.cost.S1<- rowSums(Delivery.sum.S1.dis)
+sum(Delivery.cost.S1)
+
+#5. Cost saved
+costsaved.sum.S1 <- matrix(NA, nrow=12, ncol=time)   
+for (k in 1:12) {
+  costsaved.sum.S1[k, ]<- colSums(l.costsaved.S1.dis[[k]])  }
+
+costsaved.sum.S1.dis <- matrix(NA, nrow=12, ncol=time)   
+for (i in 1:time) {
+costsaved.sum.S1.dis[, i] <- costsaved.sum.S1[, i]*(1/(1+r)^(i-1))} 
+
+cost.saved.S1<- rowSums(costsaved.sum.S1.dis)
+sum(cost.saved.S1)
+```
+
+
+```{r step4h S1 summary_ICER}
+
+#Total cost saved
+Cost.S1 = sum(Delivery.cost.S1)-sum(cost.saved.S1) 
+Cost.S1
+
+#ICER
+ICER.S1= Cost.S1/sum(DALY.averted.S1)
+ICER.S1
+
+
+#Total cost saved including I4TB
+Cost.total = Cost.S1 + Cost.topdown.i4tb
+DALY.total = sum(DALY.averted.i4tb) + sum(DALY.averted.S1)
+
+ICER.total= Cost.total/DALY.total
+ICER.total
+```
+
+```{r step 4i S1 #of case and death}
+#graph
+cost.catalytic.S1 <- colSums(Delivery.sum.S1) #2020~2030 Cost
+
+#case averted per year (10 year horizon)
+
+caseaverted.S1 <- matrix(NA, nrow=12, ncol=20) 
+for (k in 1:12) {
+  caseaverted.S1[k,1] <- l.case.S1[[k]][1,1]
+  caseaverted.S1[k,2] <- l.case.S1[[k]][2,1]+l.case.S1[[k]][1,2]
+  caseaverted.S1[k,3] <- l.case.S1[[k]][3,1]+l.case.S1[[k]][2,2]+l.case.S1[[k]][1,3]
+  caseaverted.S1[k,4] <- l.case.S1[[k]][4,1]+l.case.S1[[k]][3,2]+l.case.S1[[k]][2,3]+l.case.S1[[k]][1,4]
+  caseaverted.S1[k,5] <- l.case.S1[[k]][5,1]+l.case.S1[[k]][4,2]+l.case.S1[[k]][3,3]+l.case.S1[[k]][2,4]+l.case.S1[[k]][1,5]  
+  caseaverted.S1[k,6] <- l.case.S1[[k]][6,1]+l.case.S1[[k]][5,2]+l.case.S1[[k]][4,3]+l.case.S1[[k]][3,4]+l.case.S1[[k]][2,5]+l.case.S1[[k]][1,6]
+  caseaverted.S1[k,7] <- l.case.S1[[k]][7,1]+l.case.S1[[k]][6,2]+l.case.S1[[k]][5,3]+l.case.S1[[k]][4,4]+l.case.S1[[k]][3,5]+l.case.S1[[k]][2,6]+l.case.S1[[k]][1,7]
+  caseaverted.S1[k,8] <- l.case.S1[[k]][8,1]+l.case.S1[[k]][7,2]+l.case.S1[[k]][6,3]+l.case.S1[[k]][5,4]+l.case.S1[[k]][4,5]+l.case.S1[[k]][3,6]+l.case.S1[[k]][2,7]+l.case.S1[[k]][1,8]
+  caseaverted.S1[k,9] <- l.case.S1[[k]][9,1]+l.case.S1[[k]][8,2]+l.case.S1[[k]][7,3]+l.case.S1[[k]][6,4]+l.case.S1[[k]][5,5]+l.case.S1[[k]][4,6]+l.case.S1[[k]][3,7]+l.case.S1[[k]][2,8]+l.case.S1[[k]][1,9]
+  caseaverted.S1[k,10] <- l.case.S1[[k]][10,1]+l.case.S1[[k]][9,2]+l.case.S1[[k]][8,3]+l.case.S1[[k]][7,4]+l.case.S1[[k]][6,5]+l.case.S1[[k]][5,6]+l.case.S1[[k]][4,7]+l.case.S1[[k]][3,8]+l.case.S1[[k]][2,9]+l.case.S1[[k]][1,10]
+  caseaverted.S1[k,11] <- l.case.S1[[k]][10,2]+l.case.S1[[k]][9,3]+l.case.S1[[k]][8,4]+l.case.S1[[k]][7,5]+l.case.S1[[k]][6,6]+l.case.S1[[k]][5,7]+l.case.S1[[k]][4,8]+l.case.S1[[k]][3,9]+l.case.S1[[k]][2,10]+l.case.S1[[k]][1,11]
+  caseaverted.S1[k,12] <- l.case.S1[[k]][10,3]+l.case.S1[[k]][9,4]+l.case.S1[[k]][8,5]+l.case.S1[[k]][7,6]+l.case.S1[[k]][6,7]+l.case.S1[[k]][5,8]+l.case.S1[[k]][4,9]+l.case.S1[[k]][3,10]+l.case.S1[[k]][2,11] 
+  caseaverted.S1[k,13] <- l.case.S1[[k]][10,4]+l.case.S1[[k]][9,5]+l.case.S1[[k]][8,6]+l.case.S1[[k]][7,7]+l.case.S1[[k]][6,8]+l.case.S1[[k]][5,9]+l.case.S1[[k]][4,10]+l.case.S1[[k]][3,11] 
+  caseaverted.S1[k,14] <- l.case.S1[[k]][10,5]+l.case.S1[[k]][9,6]+l.case.S1[[k]][8,7]+l.case.S1[[k]][7,8]+l.case.S1[[k]][6,9]+l.case.S1[[k]][5,10]+l.case.S1[[k]][4,11]  
+  caseaverted.S1[k,15] <- l.case.S1[[k]][10,6]+l.case.S1[[k]][9,7]+l.case.S1[[k]][8,8]+l.case.S1[[k]][7,9]+l.case.S1[[k]][6,10]+l.case.S1[[k]][5,11] 
+  caseaverted.S1[k,16] <- l.case.S1[[k]][10,7]+l.case.S1[[k]][9,8]+l.case.S1[[k]][8,9]+l.case.S1[[k]][7,10]+l.case.S1[[k]][6,11] 
+  caseaverted.S1[k,17] <- l.case.S1[[k]][10,8]+l.case.S1[[k]][9,9]+l.case.S1[[k]][8,10]+l.case.S1[[k]][7,11]
+  caseaverted.S1[k,18] <- l.case.S1[[k]][10,9]+l.case.S1[[k]][9,10]+l.case.S1[[k]][8,11] 
+  caseaverted.S1[k,19] <- l.case.S1[[k]][10,10]+l.case.S1[[k]][9,11] 
+  caseaverted.S1[k,20] <- l.case.S1[[k]][10,11] }
+  
+Case.averted.S1 <- colSums(caseaverted.S1)
+
+#death averted per year (10 year horizon)
+
+deathaverted.S1 <- matrix(NA, nrow=12, ncol=20) 
+for (k in 1:12) {
+  deathaverted.S1[k,1] <- l.death.S1[[k]][1,1]
+  deathaverted.S1[k,2] <- l.death.S1[[k]][2,1]+l.death.S1[[k]][1,2]
+  deathaverted.S1[k,3] <- l.death.S1[[k]][3,1]+l.death.S1[[k]][2,2]+l.death.S1[[k]][1,3]
+  deathaverted.S1[k,4] <- l.death.S1[[k]][4,1]+l.death.S1[[k]][3,2]+l.death.S1[[k]][2,3]+l.death.S1[[k]][1,4]
+  deathaverted.S1[k,5] <- l.death.S1[[k]][5,1]+l.death.S1[[k]][4,2]+l.death.S1[[k]][3,3]+l.death.S1[[k]][2,4]+l.death.S1[[k]][1,5]  
+  deathaverted.S1[k,6] <- l.death.S1[[k]][6,1]+l.death.S1[[k]][5,2]+l.death.S1[[k]][4,3]+l.death.S1[[k]][3,4]+l.death.S1[[k]][2,5]+l.death.S1[[k]][1,6]
+  deathaverted.S1[k,7] <- l.death.S1[[k]][7,1]+l.death.S1[[k]][6,2]+l.death.S1[[k]][5,3]+l.death.S1[[k]][4,4]+l.death.S1[[k]][3,5]+l.death.S1[[k]][2,6]+l.death.S1[[k]][1,7]
+  deathaverted.S1[k,8] <- l.death.S1[[k]][8,1]+l.death.S1[[k]][7,2]+l.death.S1[[k]][6,3]+l.death.S1[[k]][5,4]+l.death.S1[[k]][4,5]+l.death.S1[[k]][3,6]+l.death.S1[[k]][2,7]+l.death.S1[[k]][1,8]
+  deathaverted.S1[k,9] <- l.death.S1[[k]][9,1]+l.death.S1[[k]][8,2]+l.death.S1[[k]][7,3]+l.death.S1[[k]][6,4]+l.death.S1[[k]][5,5]+l.death.S1[[k]][4,6]+l.death.S1[[k]][3,7]+l.death.S1[[k]][2,8]+l.death.S1[[k]][1,9]
+  deathaverted.S1[k,10] <- l.death.S1[[k]][10,1]+l.death.S1[[k]][9,2]+l.death.S1[[k]][8,3]+l.death.S1[[k]][7,4]+l.death.S1[[k]][6,5]+l.death.S1[[k]][5,6]+l.death.S1[[k]][4,7]+l.death.S1[[k]][3,8]+l.death.S1[[k]][2,9]+l.death.S1[[k]][1,10]
+  deathaverted.S1[k,11] <- l.death.S1[[k]][10,2]+l.death.S1[[k]][9,3]+l.death.S1[[k]][8,4]+l.death.S1[[k]][7,5]+l.death.S1[[k]][6,6]+l.death.S1[[k]][5,7]+l.death.S1[[k]][4,8]+l.death.S1[[k]][3,9]+l.death.S1[[k]][2,10]+l.death.S1[[k]][1,11]
+  deathaverted.S1[k,12] <- l.death.S1[[k]][10,3]+l.death.S1[[k]][9,4]+l.death.S1[[k]][8,5]+l.death.S1[[k]][7,6]+l.death.S1[[k]][6,7]+l.death.S1[[k]][5,8]+l.death.S1[[k]][4,9]+l.death.S1[[k]][3,10]+l.death.S1[[k]][2,11] 
+  deathaverted.S1[k,13] <- l.death.S1[[k]][10,4]+l.death.S1[[k]][9,5]+l.death.S1[[k]][8,6]+l.death.S1[[k]][7,7]+l.death.S1[[k]][6,8]+l.death.S1[[k]][5,9]+l.death.S1[[k]][4,10]+l.death.S1[[k]][3,11] 
+  deathaverted.S1[k,14] <- l.death.S1[[k]][10,5]+l.death.S1[[k]][9,6]+l.death.S1[[k]][8,7]+l.death.S1[[k]][7,8]+l.death.S1[[k]][6,9]+l.death.S1[[k]][5,10]+l.death.S1[[k]][4,11]  
+  deathaverted.S1[k,15] <- l.death.S1[[k]][10,6]+l.death.S1[[k]][9,7]+l.death.S1[[k]][8,8]+l.death.S1[[k]][7,9]+l.death.S1[[k]][6,10]+l.death.S1[[k]][5,11] 
+  deathaverted.S1[k,16] <- l.death.S1[[k]][10,7]+l.death.S1[[k]][9,8]+l.death.S1[[k]][8,9]+l.death.S1[[k]][7,10]+l.death.S1[[k]][6,11] 
+  deathaverted.S1[k,17] <- l.death.S1[[k]][10,8]+l.death.S1[[k]][9,9]+l.death.S1[[k]][8,10]+l.death.S1[[k]][7,11]
+  deathaverted.S1[k,18] <- l.death.S1[[k]][10,9]+l.death.S1[[k]][9,10]+l.death.S1[[k]][8,11] 
+  deathaverted.S1[k,19] <- l.death.S1[[k]][10,10]+l.death.S1[[k]][9,11] 
+  deathaverted.S1[k,20] <- l.death.S1[[k]][10,11] }
+  
+death.averted <- colSums(deathaverted.S1)
+
+  
+```
+
+ 
+
