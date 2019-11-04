@@ -16,6 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r donotedit, echo = FALSE, message = FALSE}
 library("knitr"); options(digits = 3, scipen = 2)
 setwd("C:/Users/julia shin/Documents/JHU/I4TB/modeling")
+# setwd("/Users/joeflack4/projects/julia_case_aversion")
 if (!require("MASS")) install.packages("MASS", repos = "http://cran.us.r-project.org")
 if (!require("gsl")) install.packages("gsl", repos = "http://cran.us.r-project.org")
 if (!require("MBESS")) install.packages("MBESS",repos = "http://cran.us.r-project.org")
@@ -566,6 +567,7 @@ for (i in 1:4) {
 names(l.cohort.i4tb) <- paste0(a)
 
 
+ilfjsfkj
 
 
 
